@@ -1,0 +1,685 @@
+#S5a
+# =============================================
+# Gene Set Enrichment Analysis (GSEA) Script
+# Description: Perform GSEA for multiple gene lists and gene sets, saving plots and results as CSVs.
+# =============================================
+
+# ======================
+# 1. Define Gene Sets and Input Files
+# ======================
+# Define file paths for gene sets
+C2_GSEA_gene_set <- "./c2.all.v2023.1.Hs.symbols.gmt"
+melanoma_GSEA_gene_set <- "./melanoma_genesets.v2023.2.Hs.gmt"
+TF_C3_GSEA_gene_set <- "./TF_c3.tft.v2023.2.Hs.symbols.gmt"
+C8_GSEA_gene_set <- "./c8.all.v2023.1.Hs.symbols (1).gmt"
+C4_GSEA_gene_set <- "./c4.all.v2023.1.Hs.symbols.gmt"
+C5_GSEA_gene_set <- "./c5.all.v2023.1.Hs.symbols.gmt"
+C6_GSEA_gene_set <- "./c6.all.v2023.1.Hs.symbols.gmt"
+C7_GSEA_gene_set <- "./c7.all.v2023.1.Hs.symbols.gmt"
+hallmark_GSEA_gene_set <- "./h.all.v2023.1.Hs.symbols.gmt"
+Kauffman_melanoma_relapse_up <- "./KAUFFMANN_MELANOMA_RELAPSE_UP.v2023.2.Hs.gmt"
+
+# Store gene sets in a named list
+gene_sets <- list(
+  C2 = C2_GSEA_gene_set,
+  melanoma = melanoma_GSEA_gene_set,
+  TF_C3 = TF_C3_GSEA_gene_set,
+  C8 = C8_GSEA_gene_set,
+  C4 = C4_GSEA_gene_set,
+  C5 = C5_GSEA_gene_set,
+  C6 = C6_GSEA_gene_set,
+  C7 = C7_GSEA_gene_set,
+  hallmark = hallmark_GSEA_gene_set,
+  Kauffman = Kauffman_melanoma_relapse_up
+)
+
+# ======================
+# 2. Define Gene Lists
+# ======================
+# Gene lists for each cell line
+gene_lists <- list(
+  A_1.1 = "gene_list_A_1.1",
+  A_1.2 = "gene_list_A_1.2",
+  A_4.1 = "gene_list_A_4.1",
+  A_4.2 = "gene_list_A_4.2",
+  W_1.1 = "gene_list_W_1.1",
+  W_1.2 = "gene_list_W_1.2",
+  W_1.3 = "gene_list_W_1.3",
+  W_4.1 = "gene_list_W_4.1",
+  W_4.2 = "gene_list_W_4.2"
+)
+
+# ======================
+# 3. Helper Functions
+# ======================
+
+# ---- 3a. Function to Clean and Sort Gene Lists ----
+GSEA_clean_sort <- function(gene_list, gene_names) {
+  names(gene_list) <- gene_names
+  gene_list <- gene_list[!is.na(gene_list)]           # Remove NA values
+  gene_list <- gene_list[!duplicated(gene_list)]      # Remove duplicates
+  gene_list <- sort(gene_list, decreasing = TRUE)     # Sort in descending order
+  return(gene_list)
+}
+
+# ---- 3b. Main GSEA Function ----
+GSEA <- function(gene_list, GO_file, pval = 0.05) {
+  set.seed(54321)
+  
+  # Check and clean gene list
+  if (any(duplicated(names(gene_list)))) {
+    warning("Duplicates in gene names detected. Removing duplicates.")
+    gene_list <- gene_list[!duplicated(names(gene_list))]
+  }
+  if (!all(order(gene_list, decreasing = TRUE) == seq_along(gene_list))) {
+    warning("Gene list not sorted. Sorting the list.")
+    gene_list <- sort(gene_list, decreasing = TRUE)
+  }
+  
+  # Load gene set pathways
+  myGO <- fgsea::gmtPathways(GO_file)
+  
+  # Perform GSEA
+  fgRes <- fgsea::fgsea(
+    pathways = myGO,
+    stats = gene_list,
+    minSize = 15,
+    maxSize = 400
+  ) %>%
+    as.data.frame() %>%
+    filter(padj < pval) %>%
+    arrange(desc(NES))
+  
+  message(paste("Number of significant gene sets:", nrow(fgRes)))
+  
+  # Collapse pathways
+  concise_pathways <- collapsePathways(
+    data.table::as.data.table(fgRes),
+    pathways = myGO,
+    stats = gene_list
+  )
+  fgRes <- fgRes[fgRes$pathway %in% concise_pathways$mainPathways, ]
+  message(paste("Number of pathways after collapsing:", nrow(fgRes)))
+  
+  # Add enrichment direction
+  fgRes$Enrichment <- ifelse(fgRes$NES > 0, "Up-regulated", "Down-regulated")
+  
+  # Select top pathways for visualization
+  filtRes <- rbind(head(fgRes, n = 10), tail(fgRes, n = 10))
+  
+  # Plot results
+  colos <- c("Up-regulated" = "firebrick2", "Down-regulated" = "dodgerblue2")
+  g1 <- ggplot(filtRes, aes(reorder(pathway, NES), NES)) +
+    geom_point(aes(fill = Enrichment, size = size), shape = 21) +
+    scale_fill_manual(values = colos) +
+    scale_size_continuous(range = c(2, 10)) +
+    geom_hline(yintercept = 0) +
+    coord_flip() +
+    labs(
+      x = "Pathway",
+      y = "Normalized Enrichment Score",
+      title = paste0("Top Pathways (Up=", sum(fgRes$Enrichment == "Up-regulated"), 
+                     ", Down=", sum(fgRes$Enrichment == "Down-regulated"), ")")
+    )
+  
+  return(list("Results" = fgRes, "Plot" = g1))
+}
+
+# ---- 3c. Combined Function to Perform GSEA and Save Results ----
+perform_gsea_and_save <- function(gene_list_name, gene_set_name) {
+  gene_list <- get(gene_list_name, envir = .GlobalEnv)
+  gene_set <- get(gene_set_name, envir = .GlobalEnv)
+  
+  # Perform GSEA
+  gsea_result <- GSEA(gene_list, gene_set, pval = 0.05)
+  
+  # Save Plot
+  timestamp <- format(Sys.Date(), "%Y%m%d")
+  plot_file <- paste0("GSEA_plot_", gene_list_name, "_", gene_set_name, "_", timestamp, ".png")
+  ggsave(filename = plot_file, plot = gsea_result$Plot, path = getwd())
+  
+  # Save Results as CSV
+  csv_file <- paste0("GSEA_results_", gene_list_name, "_", gene_set_name, "_", timestamp, ".csv")
+  write.csv(gsea_result$Results, file = csv_file, row.names = FALSE)
+}
+
+# ======================
+# 4. Run GSEA for All Gene Lists and Gene Sets
+# ======================
+for (gene_list_name in names(gene_lists)) {
+  for (gene_set_name in names(gene_sets)) {
+    message(paste("Processing:", gene_list_name, "with", gene_set_name))
+    tryCatch(
+      perform_gsea_and_save(gene_list_name, gene_set_name),
+      error = function(e) warning(paste("Failed for", gene_list_name, "and", gene_set_name, ":", e$message))
+    )
+  }
+}
+
+#S5b
+library(dplyr)
+#read in logFC_pvalue df
+
+# Function to calculate significant differential expression counts
+calculate_diff_expr_counts <- function(input_data, prefix) {  #input_data = logFC_pvalues, prefix is for picking columns
+  # Define column names
+  logFC_col <- paste0(prefix, "_logFC")
+  pvalue_col <- paste0(prefix, "_pvalue")
+  
+  # Filter data to identify significantly up- and down-regulated genes
+  up_genes <- input_data %>%
+    filter(!!sym(logFC_col) > 0.6, !!sym(pvalue_col) < 0.05) %>%
+    pull(external_gene_name)
+  
+  down_genes <- input_data %>%
+    filter(!!sym(logFC_col) < -0.6, !!sym(pvalue_col) < 0.05) %>%
+    pull(external_gene_name)
+  
+  # Return counts of up and down regulated genes
+  list(
+    up_count = length(up_genes),
+    down_count = length(down_genes),
+    up_genes = up_genes,
+    down_genes = down_genes
+  )
+}
+
+
+# Make sure input_data is defined correctly and contains the required columns for each cell line prefix
+
+# Apply function to each cell line prefix
+results <- lapply(c("A_1.1", "A_1.2", "A_4.1", "A_4.2", "W_1.1", "W_1.2", "W_1.3", "W_4.1", "W_4.2"),
+                  function(prefix) calculate_diff_expr_counts(logFC_pvalues, prefix))
+
+# Summarize results
+results_summary <- lapply(seq_along(results), function(i) {
+  c(cell_line = names(results)[i], results[[i]][c("up_count", "down_count")])
+}) %>% bind_rows() %>% as.data.frame()
+#add cell lines as row names to up/down counts for each line
+rownames(results_summary) <- c("A_1.1", "A_1.2", "A_4.1", "A_4.2", "W_1.1", "W_1.2", "W_1.3", "W_4.1", "W_4.2")
+
+write.csv(results_summary, "diff_expr_counts 110824.csv")
+
+#plot as barplot 
+ggplot(results_summary, aes(x = cell_line, y = up_count, fill = cell_line)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Up-regulated Genes Counts by Cell Line",
+       x = "Cell Line",
+       y = "Count") +
+  theme_minimal()
+
+##################### comparing shared up/down genes
+library(dplyr)
+library(tidyr)
+library(purrr)
+
+#create a list by extracting the gene names from results 
+up_genes_list <- lapply(results, function(res) res$up_genes)
+down_genes_list <- lapply(results, function(res) res$down_genes)
+
+#add labels to up/down gene lists:
+cell_lines <- c("A_1.1", "A_1.2", "A_4.1", "A_4.2", "W_1.1", "W_1.2", "W_1.3", "W_4.1", "W_4.2")
+names(up_genes_list) <- cell_lines
+names(down_genes_list) <- cell_lines
+
+
+########## Function to find shared genes across at least a specified number of cell lines
+find_shared_genes <- function(genes_list, min_shared = 3) {
+  # Flatten the list to create a tibble with each gene and the associated cell line
+  gene_table <- map_dfr(names(genes_list), ~ {
+    tibble(gene = genes_list[[.x]], cell_line = .x)
+  }) %>%
+    # Group by gene to count occurrences across cell lines
+    group_by(gene) %>%
+    summarise(
+      shared_in_cell_lines = list(cell_line),  # Collect cell lines where the gene appears
+      count = n(),  # Count number of occurrences across cell lines
+      .groups = "drop"
+    ) %>%
+    filter(count >= min_shared) %>%  # Filter genes shared in at least `min_shared` cell lines
+    mutate(cell_lines = sapply(shared_in_cell_lines, function(x) paste(x, collapse = ", ")))  # Create a string listing cell lines
+  
+  return(gene_table)
+}
+
+
+# Find shared up-regulated genes across at least 3 cell lines
+shared_up_genes <- find_shared_genes(up_genes_list, min_shared = 3) %>%
+  filter(count >=9) #adding this because there were gene name duplications leading to inaccurate rows - there are only 9 cell lines so there should be no more than 9 
+
+# Find shared down-regulated genes across at least 3 cell lines
+shared_down_genes <- find_shared_genes(down_genes_list, min_shared = 3)
+
+
+######### stacked jittered dot plot to visualize up and down genes for each line 
+data_for_jitter <- logFC_pvalues
+
+# Reshape the data to long format for ggplot
+data_long <- data_for_jitter %>%
+  pivot_longer(cols = ends_with("logFC"), names_to = "cell_line", values_to = "logFC") %>%
+  pivot_longer(cols = ends_with("pvalue"), names_to = "pvalue_col", values_to = "pvalue") %>%
+  mutate(cell_line = sub("logFC_", "", cell_line),  # Remove the 'logFC_' prefix
+         significant = ifelse(pvalue < 0.05, "Significant", "Not Significant"),
+         direction = ifelse(logFC > 0, "up", "down")) %>%
+  separate(pvalue_col, into = c("measure", "cell_line_pvalue"), sep = "_") %>%
+  select(-measure) %>%
+  mutate(cell_line_pvalue = NULL)
+
+# Plotting the stacked jitter plot with ggplot2
+ggplot(data_long, aes(x = logFC, y = cell_line, color = direction)) +
+  geom_jitter(width = 0.2, height = .1, alpha = .25) +  # Add jitter on x-axis to avoid overlapping points
+  scale_color_manual(values = c("up"  = "#FFC107", "down" = "#449AE4")) +
+  theme_minimal() +
+  labs(title = "Stacked Scatter Plot of significant logFC by Cell Line",
+       x = "logFC",
+       y = "Cell Line",
+       color = "Significance") +
+  theme(axis.text.y = element_text(size = 8))  # Adjust the size of cell line labels for readability
+
+# Save the plot as a PNG file
+ggsave("stacked_sigDEG_jitter_plot_110824.png", width = 8, height = 6, dpi = 300)  
+
+#to add labels with the numbers of up/down regulated genes for each:
+# Step 1: Calculate the number of up and downregulated genes per cell line
+summary_counts <- data_long %>%
+  group_by(cell_line, direction) %>%
+  summarise(count = n(), .groups = "drop") %>%
+  pivot_wider(names_from = direction, values_from = count, values_fill = list(count = 0)) %>%
+  mutate(total = up + down)
+
+# +  # Adjust the size of cell line labels for readability
+  geom_text(data = summary_counts, 
+            aes(x = Inf, y = cell_line, label = paste("Up:", up)), 
+            hjust = 1.3, vjust = .5, size = 5, color = "#FFC107") +
+  geom_text(data = summary_counts,
+            aes(x = Inf, y = cell_line, label = paste("Down:", down)),
+            hjust = -1.5, vjust = .5, size = 5, color = "#449AE4")
+
+
+
+###### visualize count shares with heatmap/matrix
+# Create an empty matrix to store shared gene counts
+cell_line_names <- names(up_genes_list_clean)
+shared_genes_matrix <- matrix(0, nrow = length(cell_line_names), ncol = length(cell_line_names))
+rownames(shared_genes_matrix) <- cell_line_names
+colnames(shared_genes_matrix) <- cell_line_names
+
+# Fill the matrix with the number of shared up-regulated genes between each pair of cell lines
+for (i in 1:length(cell_line_names)) {
+  for (j in i:length(cell_line_names)) {
+    shared_genes <- intersect(up_genes_list_clean[[cell_line_names[i]]], up_genes_list_clean[[cell_line_names[j]]])
+    shared_genes_matrix[i, j] <- length(shared_genes)
+    shared_genes_matrix[j, i] <- length(shared_genes)  # Symmetric matrix
+  }
+}
+
+# View the shared genes matrix
+shared_genes_matrix
+
+library(pheatmap)
+
+# Create a heatmap
+pheatmap(scale(shared_genes_matrix), 
+         display_numbers = T,   # Display the counts of shared genes on the heatmap
+         cluster_rows = T,      # Cluster the rows (cell lines)
+         cluster_cols = T,      # Cluster the columns (cell lines)
+         color = colorRampPalette(c("white", "#3182bd"))(10), # Choose a color palette
+         main = "Shared Up-regulated Genes Between Cell Lines",
+         filename = "heatmap_shared_up_genes_zscores_110824.png")  # Save the heatmap as a PNG file
+ggsave("heatmap_shared_up_genes_scaled_110824.png", width = 8, height = 6, dpi = 300)  # Save the heatmap as a PNG file
+
+
+########## Create a function to calculate the Jaccard index between two sets of genes
+jaccard_index <- function(set1, set2) {
+  intersection <- length(intersect(set1, set2))
+  union <- length(union(set1, set2))
+  jaccard <- intersection / union
+  return(jaccard)
+}
+
+# Calculate the Jaccard index between each pair of cell lines
+jaccard_matrix <- matrix(0, nrow = length(cell_line_names), ncol = length(cell_line_names))
+rownames(jaccard_matrix) <- cell_line_names
+colnames(jaccard_matrix) <- cell_line_names
+
+for (i in 1:length(cell_line_names)) {
+  for (j in i:length(cell_line_names)) {
+    jaccard <- jaccard_index(up_genes_list_clean[[cell_line_names[i]]], up_genes_list_clean[[cell_line_names[j]]])
+    jaccard_matrix[i, j] <- jaccard
+    jaccard_matrix[j, i] <- jaccard  # Symmetric matrix
+  }
+}
+
+# View the Jaccard index matrix
+jaccard_matrix
+
+# Create a heatmap of the Jaccard index matrix
+pheatmap(jaccard_matrix, 
+         display_numbers = TRUE,   # Display the Jaccard index values on the heatmap
+         cluster_rows = T,      # Cluster the rows (cell lines)
+         cluster_cols = T,      # Cluster the columns (cell lines)
+         color = colorRampPalette(c("white", "#3182bd"))(10), # Choose a color palette
+         main = "Jaccard Index Between Cell Lines",
+         filename = "heatmap_jaccard_index_110824.png")  # Save the heatmap as a PNG file
+
+
+#looking at all logFC/pvalues for genes in MAPKi resistance up gene list, and hoek2 motif
+
+calculate_diff_expr_counts_ALL <- function(input_data, prefix) {
+  # Define column names
+  logFC_col <- paste0(prefix, "_logFC")
+  pvalue_col <- paste0(prefix, "_pvalue")
+  
+  # Filter data to identify up- and down-regulated genes
+  all_up_genes <- input_data %>%
+    filter(!!sym(logFC_col) > 0) %>%
+    pull(external_gene_name)
+  
+  all_down_genes <- input_data %>%
+    filter(!!sym(logFC_col) < 0) %>%
+    pull(external_gene_name)
+  
+  # Return counts of up and down regulated genes
+  list(
+    up_count = length(up_genes),
+    down_count = length(down_genes),
+    up_genes = up_genes,
+    down_genes = down_genes
+  )
+}
+
+results <- lapply(c("A_1.1", "A_1.2", "A_4.1", "A_4.2", "W_1.1", "W_1.2", "W_1.3", "W_4.1", "W_4.2"),
+                  function(prefix) calculate_diff_expr_counts(logFC_pvalues, prefix))
+
+all_up_genes_list <- lapply(results, function(res) res$up_genes)
+all_down_genes_list <- lapply(results, function(res) res$down_genes)
+
+cell_lines <- c("A_1.1", "A_1.2", "A_4.1", "A_4.2", "W_1.1", "W_1.2", "W_1.3", "W_4.1", "W_4.2")
+names(all_up_genes_list) <- cell_lines
+names(all_down_genes_list) <- cell_lines
+
+
+#figure out a way to prioritize these genes based on expression levels across lines to identify targets for drug resistance
+
+#first for MAPKi resistance up genes (Hugo 2015)
+logFC_p_MAPKiup <- logFC_pvalues %>%
+  filter(external_gene_name %in% MAPKi_resis_up )
+
+logFC_p_MAPKiup_scores <- logFC_p_MAPKiup %>%
+  pivot_longer(
+    cols = starts_with("A_") | starts_with("W_"),
+    names_to = c("cell_line", ".value"),
+    names_pattern = "(A_[0-9]\\.[0-9]|W_[0-9]\\.[0-9])_(logFC|pvalue|adj_pvalue)"
+  )
+
+
+long_data <- logFC_p_MAPKiup_scores %>%
+  mutate(
+    IC50_dabrafenib = case_when(
+      cell_line == "A_1.1" ~ 6.209,
+      cell_line == "A_1.2" ~ 10.86,
+      cell_line == "A_4.1" ~ 16.78,
+      cell_line == "A_4.2" ~ 19.78,
+      cell_line == "W_1.1" ~ 0.3222,
+      cell_line == "W_1.2" ~ 82.24,
+      cell_line == "W_1.3" ~ 1.126,
+      cell_line == "W_4.1" ~ 15.4,
+      cell_line == "W_4.2" ~ 15.47,
+     TRUE ~ NA_real_
+    ),
+    IC50_trametinib = case_when(
+      cell_line == "A_1.1" ~ 0.9886,
+      cell_line == "A_1.2" ~ 4.388,
+      cell_line == "A_4.1" ~ 2.085,
+      cell_line == "A_4.2" ~  5.097,
+      cell_line == "W_1.1" ~ 0.0926,
+      cell_line == "W_1.2" ~ 6.772,
+      cell_line == "W_1.3" ~ 0.406,
+      cell_line == "W_4.1" ~ 3.894,
+      cell_line == "W_4.2" ~  1.178,
+      # Add cases for each cell line here
+      TRUE ~ NA_real_
+    ),
+    phenotype_score = case_when(
+      cell_line == "A_1.1" ~ 4.749805,
+      cell_line == "A_1.2" ~ 4.975302,
+      cell_line == "A_4.1" ~ 4.385401,
+      cell_line == "A_4.2" ~  4.668296,
+      cell_line == "W_1.1" ~ 3.608077,
+      cell_line == "W_1.2" ~ 4.439768,
+      cell_line == "W_1.3" ~ 3.813018,
+      cell_line == "W_4.1" ~ 4.386765,
+      cell_line == "W_4.2" ~  4.347178,
+      # Add cases for each cell line here
+      TRUE ~ NA_real_
+    )
+  )
+
+
+weight_logFC <- 1
+weight_adj_pvalue <- 1
+weight_IC50 <- 1
+weight_pheno_score <- 1
+
+# Calculate the priority score for each gene in each cell line
+data <- long_data %>%
+  mutate(priority_score = 
+           weight_logFC * abs(logFC) + 
+           weight_adj_pvalue * (1 - adj_pvalue) + 
+           weight_IC50 * (IC50_dabrafenib + IC50_trametinib) / 2 + 
+           weight_pheno_score * phenotype_score
+  )
+
+# View the data with priority scores
+head(data)
+
+
+# View the data with priority scores
+head(data)
+
+# Get the top 100 genes by priority score for each cell line
+top_genes <- data %>%
+  group_by(cell_line) %>%
+  arrange(desc(priority_score)) %>%
+  slice_head(n = 100)
+
+# View top genes for each cell line
+top_genes
+
+
+
+
+# Create a heatmap of the top genes by priority score across cell lines
+matrix_data <- top_genes %>%
+  select(external_gene_name, cell_line, priority_score) %>%
+  pivot_wider(
+    names_from = cell_line, 
+    values_from = priority_score,
+    values_fn = max  # Summarize duplicates by taking the maximum score
+  ) %>%
+  column_to_rownames("external_gene_name") %>%
+  as.data.frame() 
+
+pheatmap(matrix_data, 
+         color = colorRampPalette(rev(brewer.pal(9, "RdBu")))(100), 
+         scale = "column", 
+         cluster_rows = T, 
+         cluster_cols = FALSE,
+         fontsize_row = 6,
+         main = "Heatmap of Top Genes by Priority Score Across Cell Lines",
+         filename = "top_genes_priority_score_heatmap_110824.png")
+
+
+#summarize into average scores for each gene across lines:
+matrix_summary <- matrix_data %>%
+  t() %>%
+  as.data.frame() %>%
+  colMeans(na.rm = TRUE) %>%
+  write.csv("priorityscore_MAPKiup_genes_110824.csv")
+
+
+matrix_summary <- read.csv("priorityscore_MAPKiup_genes_110824.csv") %>%
+  arrange(desc(priority_score))
+
+max_priority_score <- max(matrix_summary$priority_score, na.rm = TRUE)
+min_priority_score <- min(matrix_summary$priority_score, na.rm = TRUE)
+
+
+
+ggplot(matrix_summary, aes(x = gene, y = priority_score)) +
+  geom_bar(stat = "identity", fill = "blue") +
+  labs(
+    x = "Gene",
+    y = "Average Priority Score",
+    title = "Average Priority Score of Top Genes Across Cell Lines"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+ggsave("average_priority_score_genes.png", width = 10, height = 6, dpi = 300)  # Save the plot as a PNG file
+
+#S5c
+# =============================================
+# Load Required Libraries
+# =============================================
+library(ggplot2)
+library(fgsea)
+library(dplyr)
+
+# =============================================
+# Function to Compute Running Enrichment Score
+# =============================================
+compute_running_score <- function(gene_list, pathway_genes) {
+  # Ensure the gene list is sorted
+  gene_list <- sort(gene_list, decreasing = TRUE)
+  
+  # Identify the positions of the hits (genes in the pathway)
+  hits <- names(gene_list) %in% pathway_genes
+  running_score <- cumsum(ifelse(hits, 1, -1 / (length(hits) - sum(hits))))
+  
+  return(running_score)
+}
+
+# =============================================
+# Function to Create Enrichment Plot
+# =============================================
+create_enrichment_plot <- function(gene_list, pathway_name, gene_set) {
+  # Ensure the gene list is sorted in decreasing order
+  gene_list <- sort(gene_list, decreasing = TRUE)
+  
+  # Extract the genes for the specified pathway
+  pathway_genes <- gene_set[[pathway_name]]
+  
+  # Check for overlap between the pathway genes and the ranked gene list
+  if (is.null(pathway_genes) || length(intersect(names(gene_list), pathway_genes)) == 0) {
+    message(paste("No overlapping genes found for pathway:", pathway_name))
+    return(NULL)
+  }
+  
+  # Compute running enrichment score
+  running_score <- compute_running_score(gene_list, pathway_genes)
+  
+  # Identify the positions of the hits (genes in the specified pathway)
+  hit_positions <- which(names(gene_list) %in% pathway_genes)
+  
+  # Create a dataframe for plotting
+  plot_data <- data.frame(
+    Position = seq_along(running_score),
+    RunningEnrichmentScore = running_score
+  )
+  
+  # Create the running enrichment score plot with hit bars
+  p <- ggplot(plot_data, aes(x = Position, y = RunningEnrichmentScore)) +
+    geom_line(color = "green", size = 1) +
+    geom_segment(
+      data = data.frame(Position = hit_positions),
+      aes(x = Position, xend = Position, y = 0, yend = 0.02 * max(plot_data$RunningEnrichmentScore)),
+      color = "blue", size = 0.5
+    ) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
+    labs(
+      title = paste("Running Enrichment Plot for", pathway_name),
+      x = "Position in the Ranked List of Genes",
+      y = "Running Enrichment Score"
+    ) +
+    theme_minimal()
+  
+  return(p)
+}
+
+# =============================================
+# Prepare Data and Pathways
+# =============================================
+
+# Load ranked gene lists (replace these with your data)
+gene_list_A_1.2 <- readRDS("gene_list_A_1.2.rds") # Example: Replace with your ranked gene list
+gene_list_A_1.1 <- readRDS("gene_list_A_1.1.rds")
+gene_list_A_4.2 <- readRDS("gene_list_A_4.2.rds")
+gene_list_W_1.1 <- readRDS("gene_list_W_1.1.rds")
+
+# Load gene sets (e.g., Hallmark, C2, or custom sets)
+gene_set <- gmtPathways("./h.all.v2023.1.Hs.symbols.gmt")
+
+# Define pathways of interest
+pathway_name <- "HALLMARK_EPITHELIAL_MESENCHYMAL_TRANSITION"
+pathway_genes <- gene_set[[pathway_name]]
+
+# =============================================
+# Create and Save Individual Enrichment Plots
+# =============================================
+plot_hypoxia <- create_enrichment_plot(gene_list_A_1.2, "ELVIDGE_HYPOXIA_UP", gene_set)
+ggsave("hypoxia_enrichment_plot.png", plot_hypoxia, width = 8, height = 6, dpi = 300)
+
+plot_EMT <- create_enrichment_plot(gene_list_W_1.2, "HALLMARK_EPITHELIAL_MESENCHYMAL_TRANSITION", gene_set)
+ggsave("emt_enrichment_plot.png", plot_EMT, width = 8, height = 6, dpi = 300)
+
+# =============================================
+# Create and Save Multi-Line Enrichment Plot
+# =============================================
+
+# Compute running scores for multiple cell lines
+running_score_A_1.2 <- compute_running_score(gene_list_A_1.2, pathway_genes)
+running_score_A_1.1 <- compute_running_score(gene_list_A_1.1, pathway_genes)
+running_score_A_4.2 <- compute_running_score(gene_list_A_4.2, pathway_genes)
+running_score_W_1.1 <- compute_running_score(gene_list_W_1.1, pathway_genes)
+
+# Determine the minimum length of the running scores
+min_length <- min(length(running_score_A_1.2), length(running_score_A_1.1), 
+                  length(running_score_A_4.2), length(running_score_W_1.1))
+
+# Truncate running score vectors to the minimum length
+running_scores <- list(
+  A_1.2 = running_score_A_1.2[1:min_length],
+  A_1.1 = running_score_A_1.1[1:min_length],
+  A_4.2 = running_score_A_4.2[1:min_length],
+  W_1.1 = running_score_W_1.1[1:min_length]
+)
+
+# Combine into a data frame for plotting
+plot_data <- do.call(rbind, lapply(names(running_scores), function(cell_line) {
+  data.frame(
+    Position = seq_len(min_length),
+    RunningEnrichmentScore = running_scores[[cell_line]],
+    CellLine = cell_line
+  )
+}))
+
+# Plot multi-line enrichment plot
+multi_line_plot <- ggplot(plot_data, aes(x = Position, y = RunningEnrichmentScore, color = CellLine)) +
+  geom_line(size = 1) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
+  labs(
+    title = "Running Enrichment Plot for Multiple Cell Lines",
+    x = "Position in the Ranked List of Genes",
+    y = "Running Enrichment Score",
+    color = "Cell Line"
+  ) +
+  theme_minimal()
+
+# Save the multi-line plot
+ggsave("multi_line_enrichment_plot.png", multi_line_plot, width = 10, height = 6, dpi = 300)
+
+# =============================================
+# Additional Analysis: Max Enrichment Score
+# =============================================
+max_score_A_1.2 <- max(running_score_A_1.2)
+cat("Max Enrichment Score for A_1.2:", max_score_A_1.2, "\n")
