@@ -1,0 +1,110 @@
+# Preprocessing Script for Differential Gene Expression Analysis
+# Author: [Your Name]
+# Description: Preprocesses raw differentially expressed gene data into logFC dataframes, subsets, and sample-specific data.
+
+# ======================
+# 1. Load Required Packages
+# ======================
+# Install missing packages if necessary (optional)
+# Uncomment to use: 
+# install.packages(c("tidyverse", "dplyr", "ggplot2", "pheatmap", "RColorBrewer"))
+
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(ggrepel)
+library(tidyr)
+library(pheatmap)
+library(RColorBrewer)
+library(reshape)
+library(gplots)
+library(ggfortify)
+library(tibble)
+library(plotly)
+library(samr)
+
+# ======================
+# 2. Load Raw Data
+# ======================
+# NOTE: The `DER.csv` file is not included in this repository due to size constraints.
+# Please replace "DER.csv" with the path to your local file or download raw data from GEO accession number: .
+
+differentially_expressed_genes <- read.csv("path/to/DER.csv")
+
+
+# ======================
+# 3. Preprocess Data into Subsets
+# ======================
+
+# ----- 3a. Subset DEG into logFC dataframes for all samples -----
+logFC_base_all <- differentially_expressed_genes %>%
+  select(external_gene_name, ends_with("logFC")) %>%
+  select(external_gene_name, ends_with("a375_wt_logFC") | ends_with("wm115_wt5_logFC")) %>%
+  dplyr::rename(
+    A_1.2_logFC = a375_2g1.a375_wt_logFC,
+    A_1.1_logFC = a375_3b3.a375_wt_logFC,
+    A_4.1_logFC = a375_1e3.a375_wt_logFC,
+    A_4.2_logFC = a375_1e12.a375_wt_logFC,
+    W_1.1_logFC = wm115_c10.wm115_wt5_logFC,
+    W_1.2_logFC = wm115_c11.wm115_wt5_logFC,
+    W_1.3_logFC = wm115_c14.wm115_wt5_logFC,
+    W_4.1_logFC = wm115_c3.wm115_wt5_logFC,
+    W_4.2_logFC = wm115_c4.wm115_wt5_logFC
+  ) %>%
+  distinct() %>%
+  select(external_gene_name, A_1.2_logFC, A_1.1_logFC, A_4.1_logFC, A_4.2_logFC, W_1.1_logFC, W_1.2_logFC, W_1.3_logFC, W_4.1_logFC, W_4.2_logFC)
+
+# ----- 3b. Create separate logFC dataframes for A375 and WM115 samples -----
+logFC_base_a375 <- logFC_base_all %>%
+  select(external_gene_name, starts_with("A"))
+
+logFC_base_wm115 <- logFC_base_all %>%
+  select(external_gene_name, starts_with("W"))
+
+# ----- 3c. Subset DEG dataframe into sample-specific columns -----
+sample_values <- differentially_expressed_genes %>%
+  select(external_gene_name, starts_with("sample"))
+
+# ----- 3d. Subset logFC with p-value and adjusted p-value columns -----
+logFC_pvalues <- differentially_expressed_genes %>%
+  dplyr::rename(
+    A_1.2_logFC = a375_2g1.a375_wt_logFC,
+    A_1.1_logFC = a375_3b3.a375_wt_logFC,
+    A_4.1_logFC = a375_1e3.a375_wt_logFC,
+    A_4.2_logFC = a375_1e12.a375_wt_logFC,
+    W_1.1_logFC = wm115_c10.wm115_wt5_logFC,
+    W_1.2_logFC = wm115_c11.wm115_wt5_logFC,
+    W_1.3_logFC = wm115_c14.wm115_wt5_logFC,
+    W_4.1_logFC = wm115_c3.wm115_wt5_logFC,
+    W_4.2_logFC = wm115_c4.wm115_wt5_logFC,
+    A_1.2_pvalue = a375_2g1.a375_wt_P.Value,
+    A_1.1_pvalue = a375_3b3.a375_wt_P.Value,
+    A_4.1_pvalue = a375_1e3.a375_wt_P.Value,
+    A_4.2_pvalue = a375_1e12.a375_wt_P.Value,
+    W_1.1_pvalue = wm115_c10.wm115_wt5_P.Value,
+    W_1.2_pvalue = wm115_c11.wm115_wt5_P.Value,
+    W_1.3_pvalue = wm115_c14.wm115_wt5_P.Value,
+    W_4.1_pvalue = wm115_c3.wm115_wt5_P.Value,
+    W_4.2_pvalue = wm115_c4.wm115_wt5_P.Value,
+    A_1.2_adj_pvalue = a375_2g1.a375_wt_adj.P.Val,
+    A_1.1_adj_pvalue = a375_3b3.a375_wt_adj.P.Val,
+    A_4.1_adj_pvalue = a375_1e3.a375_wt_adj.P.Val,
+    A_4.2_adj_pvalue = a375_1e12.a375_wt_adj.P.Val,
+    W_1.1_adj_pvalue = wm115_c10.wm115_wt5_adj.P.Val,
+    W_1.2_adj_pvalue = wm115_c11.wm115_wt5_adj.P.Val,
+    W_1.3_adj_pvalue = wm115_c14.wm115_wt5_adj.P.Val,
+    W_4.1_adj_pvalue = wm115_c3.wm115_wt5_adj.P.Val,
+    W_4.2_adj_pvalue = wm115_c4.wm115_wt5_adj.P.Val
+  ) %>%
+  select(external_gene_name, A_1.2_logFC, A_1.1_logFC, A_4.1_logFC, A_4.2_logFC, W_1.1_logFC, W_1.2_logFC, W_1.3_logFC, W_4.1_logFC, W_4.2_logFC)
+
+# ======================
+# 4. Save Preprocessed Data (Optional)
+# ======================
+# Save the preprocessed dataframes as .csv or .RDS files for later use
+write.csv(logFC_base_all, "processed_logFC_base_all.csv", row.names = FALSE)
+write.csv(logFC_base_a375, "processed_logFC_base_a375.csv", row.names = FALSE)
+write.csv(logFC_base_wm115, "processed_logFC_base_wm115.csv", row.names = FALSE)
+write.csv(logFC_pvalues, "processed_logFC_pvalues.csv", row.names = FALSE)
+
+# End of Script
