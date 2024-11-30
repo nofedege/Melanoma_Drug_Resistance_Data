@@ -1,0 +1,96 @@
+# =============================================
+# Averaging Sample Replicates and Heatmap Generation
+# =============================================
+
+# ======================
+# 1. Average Sample Replicates
+# ======================
+# Extract the sample groups (remove replicate numbers)
+sample_columns <- names(sample_values)[-1]  # Exclude 'external_gene_name'
+sample_groups <- unique(sub("(sample\\.\\w+_\\w+)_\\d+", "\\1", sample_columns))
+
+# Initialize a new data frame with external_gene_name
+averaged_samples <- data.frame(external_gene_name = sample_values$external_gene_name)
+
+# Calculate the mean for each group of replicates
+for (group in sample_groups) {
+  # Get the columns corresponding to the current group
+  group_columns <- grep(paste0("^", group, "_"), names(sample_values), value = TRUE)
+  
+  # Calculate the row-wise mean for these columns
+  group_mean <- rowMeans(sample_values[group_columns])
+  
+  # Add the mean values as a new column in the new data frame
+  averaged_samples[[group]] <- group_mean
+}
+
+# Remove unwanted columns (specific to your dataset)
+averaged_samples <- averaged_samples %>%
+  select(-sample.wm115_wt3, -sample.wm115_wt4)
+
+# View the averaged data frame
+head(averaged_samples)
+
+# ======================
+# 2. Filter for Significant Genes
+# ======================
+# Step 1: Identify columns containing "adj_pvalue" and "logFC"
+adj_pvalue_columns <- names(logFC_pvalues)[grepl("adj_pvalue", names(logFC_pvalues))]
+logFC_columns <- names(logFC_pvalues)[grepl("logFC", names(logFC_pvalues))]
+
+# Step 2: Filter significant genes based on thresholds
+sig_logFC_pval <- logFC_pvalues %>% 
+  filter(if_any(all_of(logFC_columns), ~ . > 0.6 | . < -0.6) & 
+           if_any(all_of(adj_pvalue_columns), ~ . < 0.05))
+
+# Step 3: Extract the gene names
+sig_logFC_genes <- sig_logFC_pval$external_gene_name
+
+# Filter averaged samples to include only significant genes
+sig_DEG_voom <- averaged_samples %>%
+  filter(external_gene_name %in% sig_logFC_genes)
+
+# ======================
+# 3. Generate Heatmap for Significant Genes
+# ======================
+pheatmap(sig_DEG_voom[, -1], 
+         cluster_rows = TRUE, 
+         cluster_cols = FALSE, 
+         show_rownames = FALSE, 
+         show_colnames = TRUE,
+         color = colorRampPalette(c("blue", "white", "red"))(100),
+         main = "Heatmap of Significant Genes")
+
+# ======================
+# 4. Subset by Hoek Motifs and Generate Heatmap
+# ======================
+# Filter for Hoek motifs
+hoek_averaged_samples <- sig_DEG_voom %>%
+  filter(external_gene_name %in% hoek_motif_one | external_gene_name %in% hoek_motif_two) %>%
+  mutate(hoek_motif = ifelse(external_gene_name %in% hoek_motif_one, "Motif 1", "Motif 2")) %>%
+  unique() %>%
+  arrange(hoek_motif) %>%
+  as.data.frame() %>%
+  column_to_rownames("external_gene_name")
+
+# Prepare the data matrix for heatmap
+data_matrix <- hoek_averaged_samples %>%
+  select(contains("sample")) %>%
+  as.matrix()
+
+# Prepare the annotation data
+annotation_row <- data.frame(motif = hoek_averaged_samples$hoek_motif)
+rownames(annotation_row) <- rownames(hoek_averaged_samples)
+
+# Generate the heatmap
+pheatmap(data_matrix[, 1:5], 
+         scale = "row",
+         cluster_rows = TRUE, 
+         cluster_cols = TRUE, 
+         show_rownames = TRUE, 
+         show_colnames = TRUE,
+         annotation_row = annotation_row,
+         gaps_col = 4,  # Insert a gap after column 4
+         color = colorRampPalette(c("blue", "white", "red"))(100),
+         fontsize = 8,
+         main = "Heatmap of Hoek Motifs")
