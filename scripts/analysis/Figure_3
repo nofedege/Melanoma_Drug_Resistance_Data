@@ -1,0 +1,152 @@
+#PCA Analysis for Cell Lines (A375 and WM115)
+#This script performs PCA on gene expression data for A375 and WM115 cell lines and generates plots (labeled, unlabeled, and clustered) used in the right-hand side of Figure 3 in the paper.
+
+# Load required libraries
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(cluster)
+
+# Set working directory for file outputs
+setwd("/Users/noahdegeorgia/Desktop/Organize!")
+
+# Set reproducibility seed for clustering
+set.seed(123)
+
+# Custom color palette for cell line types
+allcolors <- c(
+  "W_WT" = "black",
+  "W_1.1" = "#7ec351", "W_1.2" = "#c75640", "W_1.3" = "#79bfd9",
+  "W_4.1" = "#ea938e", "W_4.2" = "#133e68",
+  "A_WT" = "#656e7a",
+  "A_1.1" = "#0f73b5", "A_1.2" = "#e73f39",
+  "A_4.1" = "#f6b01a", "A_4.2" = "#10c0db"
+)
+a375_colors <- allcolors[c("A_WT", "A_1.1", "A_1.2", "A_4.1", "A_4.2")]
+wm115_colors <- allcolors[c("W_WT", "W_1.1", "W_1.2", "W_1.3", "W_4.1", "W_4.2")]
+
+#### PCA for all cell lines:
+# PCA for all cell lines
+data <- sample_values[, sapply(sample_values, is.numeric)] %>% t()  # Transpose numeric data
+pca_result <- prcomp(data, center = TRUE, scale. = TRUE)
+
+# Add sample labels and cell type annotations
+pca_df_labeled <- as.data.frame(pca_result$x) %>%
+  rownames_to_column(var = "Sample") %>%
+  mutate(
+    Sample = as.character(Sample),
+    Cell_Type = case_when(
+      grepl("c10", Sample) ~ "W_1.1", grepl("c11", Sample) ~ "W_1.2",
+      grepl("c14", Sample) ~ "W_1.3", grepl("c3", Sample) ~ "W_4.1",
+      grepl("c4", Sample) ~ "W_4.2", grepl("wt5", Sample) ~ "W_WT",
+      grepl("1e12", Sample) ~ "A_4.2", grepl("1e3", Sample) ~ "A_4.1",
+      grepl("2g1", Sample) ~ "A_1.2", grepl("3b3", Sample) ~ "A_1.1",
+      grepl("wt", Sample) ~ "A_WT"
+    )
+  )
+
+# Plot PCA for all cell lines (labeled and unlabeled)
+ggplot(pca_df_labeled, aes(x = PC1, y = PC2, label = Cell_Type, color = Cell_Type)) +
+  geom_point(size = 5, alpha = .9) +
+  geom_text(vjust = -1, size = 3) +
+  xlab(paste0("PC1 (", round(summary(pca_result)$importance[2, 1] * 100, 1), "%)")) +
+  ylab(paste0("PC2 (", round(summary(pca_result)$importance[2, 2] * 100, 1), "%)")) +
+  scale_color_manual(values = allcolors) +
+  theme_minimal() +
+  ggtitle("PCA of All Cell Lines")
+ggsave("PCA_plot_samples_all_lines_labeled.png")
+
+ggplot(pca_df_labeled, aes(x = PC1, y = PC2, color = Cell_Type)) +
+  geom_point(size = 8, alpha = .8) +
+  xlab(paste0("PC1 (", round(summary(pca_result)$importance[2, 1] * 100, 1), "%)")) +
+  ylab(paste0("PC2 (", round(summary(pca_result)$importance[2, 2] * 100, 1), "%)")) +
+  scale_color_manual(values = allcolors) +
+  theme_minimal() +
+  ggtitle("PCA of All Cell Lines (Unlabeled)")
+ggsave("PCA_plot_samples_all_lines_unlabeled.png")
+
+#### PCA for A375 cell lines only:
+# PCA for A375 cell lines
+A_data <- sample_values %>%
+  select(contains("a375")) %>% t()
+A_pca_result <- prcomp(A_data, center = TRUE, scale. = TRUE)
+
+# Add sample labels and cell type annotations
+A_pca_df_labeled <- as.data.frame(A_pca_result$x) %>%
+  rownames_to_column(var = "Sample") %>%
+  mutate(
+    Sample = as.character(Sample),
+    Cell_Type = case_when(
+      grepl("1e12", Sample) ~ "A_4.2", grepl("1e3", Sample) ~ "A_4.1",
+      grepl("2g1", Sample) ~ "A_1.2", grepl("3b3", Sample) ~ "A_1.1",
+      grepl("wt", Sample) ~ "A_WT"
+    )
+  )
+
+# Plot PCA for A375 lines (labeled and unlabeled)
+ggplot(A_pca_df_labeled, aes(x = PC1, y = PC2, label = Cell_Type, color = Cell_Type)) +
+  geom_point() +
+  geom_text(vjust = -1, size = 3) +
+  xlab(paste0("PC1 (", round(summary(A_pca_result)$importance[2, 1] * 100, 1), "%)")) +
+  ylab(paste0("PC2 (", round(summary(A_pca_result)$importance[2, 2] * 100, 1), "%)")) +
+  scale_color_manual(values = a375_colors) +
+  theme_minimal() +
+  ggtitle("PCA of A375 Cell Lines")
+ggsave("PCA_plot_A375_labeled.png")
+
+ggplot(A_pca_df_labeled, aes(x = PC1, y = PC2, color = Cell_Type)) +
+  geom_point(size = 7, alpha = .9) +
+  xlab(paste0("PC1 (", round(summary(A_pca_result)$importance[2, 1] * 100, 1), "%)")) +
+  ylab(paste0("PC2 (", round(summary(A_pca_result)$importance[2, 2] * 100, 1), "%)")) +
+  scale_color_manual(values = a375_colors) +
+  theme_minimal() +
+  ggtitle("PCA of A375 Cell Lines (Unlabeled)")
+ggsave("PCA_plot_A375_unlabeled.png")
+
+
+####PCA for WM115 cell lines only:
+# PCA for WM115 cell lines
+W_data <- sample_values %>%
+  select(contains("wm115")) %>% t()
+W_pca_result <- prcomp(W_data, center = TRUE, scale. = TRUE)
+
+# Add sample labels and cell type annotations
+W_pca_df_labeled <- as.data.frame(W_pca_result$x) %>%
+  rownames_to_column(var = "Sample") %>%
+  mutate(
+    Sample = as.character(Sample),
+    Cell_Type = case_when(
+      grepl("c10", Sample) ~ "W_1.1", grepl("c11", Sample) ~ "W_1.2",
+      grepl("c14", Sample) ~ "W_1.3", grepl("c3", Sample) ~ "W_4.1",
+      grepl("c4", Sample) ~ "W_4.2", grepl("wt5", Sample) ~ "W_WT"
+    )
+  )
+
+# Plot PCA for WM115 lines (labeled and unlabeled)
+ggplot(W_pca_df_labeled, aes(x = PC1, y = PC2, label = Cell_Type, color = Cell_Type)) +
+  geom_point() +
+  geom_text(vjust = -1, size = 3) +
+  xlab(paste0("PC1 (", round(summary(W_pca_result)$importance[2, 1] * 100, 1), "%)")) +
+  ylab(paste0("PC2 (", round(summary(W_pca_result)$importance[2, 2] * 100, 1), "%)")) +
+  scale_color_manual(values = wm115_colors) +
+  theme_minimal() +
+  ggtitle("PCA of WM115 Cell Lines")
+ggsave("PCA_plot_WM115_labeled.png")
+
+ggplot(W_pca_df_labeled, aes(x = PC1, y = PC2, color = Cell_Type)) +
+  geom_point(size = 7, alpha = .9) +
+  xlab(paste0("PC1 (", round(summary(W_pca_result)$importance[2, 1] * 100, 1), "%)")) +
+  ylab(paste0("PC2 (", round(summary(W_pca_result)$importance[2, 2] * 100, 1), "%)")) +
+  scale_color_manual(values = wm115_colors) +
+  theme_minimal() +
+  ggtitle("PCA of WM115 Cell Lines (Unlabeled)")
+ggsave("PCA_plot_WM115_unlabeled.png")
+
+
+####Clustering and Optimal K
+# Example: Determine optimal k using elbow method for A375
+wss <- sapply(1:10, function(k) {
+  kmeans(A_pca_df_labeled[, c("PC1", "PC2")], centers = k)$tot.withinss
+})
+plot(1:10, wss, type = "b", pch = 19, xlab = "Number of Clusters", ylab = "WSS", main = "Elbow Method for A375")
+ggsave("elbow_method_A375.png")
