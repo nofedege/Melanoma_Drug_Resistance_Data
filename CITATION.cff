@@ -1,0 +1,9 @@
+cff-version: 1.2.0
+message: "If you use this data, please cite our paper and this repository."
+title: "Data for 'Title of the Paper'"
+authors:
+  - family-names: "DeGeorgia"
+    given-names: "Noah"
+date-released: "2024-11-30"
+version: "1.0.0"
+doi: "10.xxxx/yyyy"
