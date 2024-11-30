@@ -1,0 +1,156 @@
+# =============================================
+# Gene Set Enrichment Analysis (GSEA) Script
+# Description: Perform GSEA for multiple gene lists and gene sets, saving plots and results as CSVs.
+# =============================================
+
+# ======================
+# 1. Define Gene Sets and Input Files
+# ======================
+# Define file paths for gene sets
+C2_GSEA_gene_set <- "./c2.all.v2023.1.Hs.symbols.gmt"
+melanoma_GSEA_gene_set <- "./melanoma_genesets.v2023.2.Hs.gmt"
+TF_C3_GSEA_gene_set <- "./TF_c3.tft.v2023.2.Hs.symbols.gmt"
+C8_GSEA_gene_set <- "./c8.all.v2023.1.Hs.symbols (1).gmt"
+C4_GSEA_gene_set <- "./c4.all.v2023.1.Hs.symbols.gmt"
+C5_GSEA_gene_set <- "./c5.all.v2023.1.Hs.symbols.gmt"
+C6_GSEA_gene_set <- "./c6.all.v2023.1.Hs.symbols.gmt"
+C7_GSEA_gene_set <- "./c7.all.v2023.1.Hs.symbols.gmt"
+hallmark_GSEA_gene_set <- "./h.all.v2023.1.Hs.symbols.gmt"
+Kauffman_melanoma_relapse_up <- "./KAUFFMANN_MELANOMA_RELAPSE_UP.v2023.2.Hs.gmt"
+
+# Store gene sets in a named list
+gene_sets <- list(
+  C2 = C2_GSEA_gene_set,
+  melanoma = melanoma_GSEA_gene_set,
+  TF_C3 = TF_C3_GSEA_gene_set,
+  C8 = C8_GSEA_gene_set,
+  C4 = C4_GSEA_gene_set,
+  C5 = C5_GSEA_gene_set,
+  C6 = C6_GSEA_gene_set,
+  C7 = C7_GSEA_gene_set,
+  hallmark = hallmark_GSEA_gene_set,
+  Kauffman = Kauffman_melanoma_relapse_up
+)
+
+# ======================
+# 2. Define Gene Lists
+# ======================
+# Gene lists for each cell line
+gene_lists <- list(
+  A_1.1 = "gene_list_A_1.1",
+  A_1.2 = "gene_list_A_1.2",
+  A_4.1 = "gene_list_A_4.1",
+  A_4.2 = "gene_list_A_4.2",
+  W_1.1 = "gene_list_W_1.1",
+  W_1.2 = "gene_list_W_1.2",
+  W_1.3 = "gene_list_W_1.3",
+  W_4.1 = "gene_list_W_4.1",
+  W_4.2 = "gene_list_W_4.2"
+)
+
+# ======================
+# 3. Helper Functions
+# ======================
+
+# ---- 3a. Function to Clean and Sort Gene Lists ----
+GSEA_clean_sort <- function(gene_list, gene_names) {
+  names(gene_list) <- gene_names
+  gene_list <- gene_list[!is.na(gene_list)]           # Remove NA values
+  gene_list <- gene_list[!duplicated(gene_list)]      # Remove duplicates
+  gene_list <- sort(gene_list, decreasing = TRUE)     # Sort in descending order
+  return(gene_list)
+}
+
+# ---- 3b. Main GSEA Function ----
+GSEA <- function(gene_list, GO_file, pval = 0.05) {
+  set.seed(54321)
+  
+  # Check and clean gene list
+  if (any(duplicated(names(gene_list)))) {
+    warning("Duplicates in gene names detected. Removing duplicates.")
+    gene_list <- gene_list[!duplicated(names(gene_list))]
+  }
+  if (!all(order(gene_list, decreasing = TRUE) == seq_along(gene_list))) {
+    warning("Gene list not sorted. Sorting the list.")
+    gene_list <- sort(gene_list, decreasing = TRUE)
+  }
+  
+  # Load gene set pathways
+  myGO <- fgsea::gmtPathways(GO_file)
+  
+  # Perform GSEA
+  fgRes <- fgsea::fgsea(
+    pathways = myGO,
+    stats = gene_list,
+    minSize = 15,
+    maxSize = 400
+  ) %>%
+    as.data.frame() %>%
+    filter(padj < pval) %>%
+    arrange(desc(NES))
+  
+  message(paste("Number of significant gene sets:", nrow(fgRes)))
+  
+  # Collapse pathways
+  concise_pathways <- collapsePathways(
+    data.table::as.data.table(fgRes),
+    pathways = myGO,
+    stats = gene_list
+  )
+  fgRes <- fgRes[fgRes$pathway %in% concise_pathways$mainPathways, ]
+  message(paste("Number of pathways after collapsing:", nrow(fgRes)))
+  
+  # Add enrichment direction
+  fgRes$Enrichment <- ifelse(fgRes$NES > 0, "Up-regulated", "Down-regulated")
+  
+  # Select top pathways for visualization
+  filtRes <- rbind(head(fgRes, n = 10), tail(fgRes, n = 10))
+  
+  # Plot results
+  colos <- c("Up-regulated" = "firebrick2", "Down-regulated" = "dodgerblue2")
+  g1 <- ggplot(filtRes, aes(reorder(pathway, NES), NES)) +
+    geom_point(aes(fill = Enrichment, size = size), shape = 21) +
+    scale_fill_manual(values = colos) +
+    scale_size_continuous(range = c(2, 10)) +
+    geom_hline(yintercept = 0) +
+    coord_flip() +
+    labs(
+      x = "Pathway",
+      y = "Normalized Enrichment Score",
+      title = paste0("Top Pathways (Up=", sum(fgRes$Enrichment == "Up-regulated"), 
+                     ", Down=", sum(fgRes$Enrichment == "Down-regulated"), ")")
+    )
+  
+  return(list("Results" = fgRes, "Plot" = g1))
+}
+
+# ---- 3c. Combined Function to Perform GSEA and Save Results ----
+perform_gsea_and_save <- function(gene_list_name, gene_set_name) {
+  gene_list <- get(gene_list_name, envir = .GlobalEnv)
+  gene_set <- get(gene_set_name, envir = .GlobalEnv)
+  
+  # Perform GSEA
+  gsea_result <- GSEA(gene_list, gene_set, pval = 0.05)
+  
+  # Save Plot
+  timestamp <- format(Sys.Date(), "%Y%m%d")
+  plot_file <- paste0("GSEA_plot_", gene_list_name, "_", gene_set_name, "_", timestamp, ".png")
+  ggsave(filename = plot_file, plot = gsea_result$Plot, path = getwd())
+  
+  # Save Results as CSV
+  csv_file <- paste0("GSEA_results_", gene_list_name, "_", gene_set_name, "_", timestamp, ".csv")
+  write.csv(gsea_result$Results, file = csv_file, row.names = FALSE)
+}
+
+# ======================
+# 4. Run GSEA for All Gene Lists and Gene Sets
+# ======================
+for (gene_list_name in names(gene_lists)) {
+  for (gene_set_name in names(gene_sets)) {
+    message(paste("Processing:", gene_list_name, "with", gene_set_name))
+    tryCatch(
+      perform_gsea_and_save(gene_list_name, gene_set_name),
+      error = function(e) warning(paste("Failed for", gene_list_name, "and", gene_set_name, ":", e$message))
+    )
+  }
+}
