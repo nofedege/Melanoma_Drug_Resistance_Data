@@ -1,0 +1,231 @@
+#4a
+# Load required libraries
+library(multcomp)
+library(dplyr)
+
+# Input data (replace this with your actual dataset)
+data <- data.frame(
+  Group = c("A_WT", "A_1.1", "A_1.2", "A_4.1", "A_4.2",
+            "W_WT5", "W_1.1", "W_1.2", "W_1.3", "W_4.1", "W_4.2"),
+  Mean_Score = c(4.431077, 4.749805, 4.975302, 4.385401, 4.668296,
+                 3.568966, 3.608077, 4.439768, 3.813018, 4.386765, 4.347178)
+)
+
+# Define grouping for comparison
+data <- data %>%
+  mutate(
+    Comparison_Group = case_when(
+      grepl("^A_", Group) ~ "A_WT",
+      grepl("^W_", Group) ~ "W_WT5",
+      TRUE ~ NA_character_
+    )
+  )
+
+# Ensure `Comparison_Group` is a factor and reorder levels
+data$Comparison_Group <- factor(data$Comparison_Group, levels = unique(data$Comparison_Group))
+
+# Create a linear model
+lm_model <- lm(Mean_Score ~ Group, data = data)
+
+# Dunnett's multiple comparison test
+dunnett_test <- glht(
+  lm_model,
+  linfct = mcp(Group = "Dunnett")
+)
+
+# Summary of the test results
+summary_dunnett <- summary(dunnett_test)
+
+# Extract and save results
+dunnett_results <- summary_dunnett$test
+dunnett_table <- data.frame(
+  Group = rownames(dunnett_results$coefficients),
+  Mean_Diff = dunnett_results$coefficients,
+  Std_Error = dunnett_results$sigma,
+  Z_Value = dunnett_results$tstat,
+  P_Value = dunnett_results$pvalues
+)
+
+# Print the table
+print(dunnett_table)
+
+# Save results to a CSV file
+write.csv(dunnett_table, "Dunnett_test_results.csv", row.names = FALSE)
+
+# Visualization (optional)
+library(ggplot2)
+
+ggplot(dunnett_table, aes(x = Group, y = Mean_Diff)) +
+  geom_col(fill = "steelblue") +
+  geom_errorbar(aes(ymin = Mean_Diff - 1.96 * Std_Error, ymax = Mean_Diff + 1.96 * Std_Error), width = 0.2) +
+  labs(
+    title = "Dunnett's Test: Mean Differences",
+    x = "Comparison Group",
+    y = "Mean Difference"
+  ) +
+  theme_minimal()
+
+#4b
+# Load required libraries
+library(ggplot2)
+library(dplyr)
+
+# =============================================
+# Function: Create Paired Arrow Plot
+# =============================================
+create_paired_arrow_plot <- function(data, wt_col, deletion_col, line_col, group_col, colors, plot_title, file_name) {
+  # Reverse the order of the y-axis levels for better visualization
+  data[[line_col]] <- factor(data[[line_col]], levels = rev(unique(data[[line_col]])))
+  
+  # Generate the plot
+  plot <- ggplot(data) +
+    # Plot WT points
+    geom_point(aes_string(x = wt_col, y = line_col), color = "black", size = 3, shape = 16) +
+    # Plot Deletion points
+    geom_point(aes_string(x = deletion_col, y = line_col, color = group_col), size = 3, shape = 16) +
+    # Draw arrows from WT to Deletion
+    geom_segment(aes_string(x = wt_col, xend = deletion_col, y = line_col, yend = line_col, color = group_col), 
+                 arrow = arrow(length = unit(0.1, "inches")), size = 0.7) +
+    # Customize color palette
+    scale_color_manual(values = colors) +
+    # Add axis labels and plot title
+    labs(x = "X Value (WT to Deletion)", y = "Line", color = "Group", title = plot_title) +
+    # Apply minimal theme
+    theme_minimal() +
+    # Adjust legend position
+    theme(legend.position = "right")
+  
+  # Save the plot to a file
+  ggsave(file_name, plot = plot, width = 8, height = 6, dpi = 300)
+  
+  # Return the plot
+  return(plot)
+}
+
+# =============================================
+# Example Usage
+# =============================================
+
+# Input data (replace with your actual data)
+data <- data.frame(
+  Line = c("A_1.1", "A_1.2", "A_4.1", "A_4.2", 
+           "W_1.1", "W_1.2", "W_1.3", "W_4.1", "W_4.2"),
+  WT = c(4, 4, 4, 4, 3.5, 3.5, 3.5, 3.5, 3.5),  # WT positions (x)
+  Deletion = c(4.5, 5, 4.2, 4.6, 3.7, 4.2, 3.9, 3.8, 4.1), # Deletion positions (x)
+  Group = c("A", "A", "A", "A", "W", "W", "W", "W", "W")  # Group (e.g., A, W)
+)
+
+# Define custom colors for groups
+group_colors <- c("A" = "blue", "W" = "green")
+
+# Create the plot
+arrow_plot <- create_paired_arrow_plot(
+  data = data,
+  wt_col = "WT",             # Column for WT positions
+  deletion_col = "Deletion", # Column for Deletion positions
+  line_col = "Line",         # Column for Line names
+  group_col = "Group",       # Column for Group (A or W)
+  colors = group_colors,     # Custom colors for groups
+  plot_title = "Paired Arrow Plot: WT to Deletion",  # Title of the plot
+  file_name = "paired_arrow_plot.png"               # Output file name
+)
+
+# Print the plot in RStudio
+print(arrow_plot)
+
+
+#4c
+# =============================================
+# Tsoi Subtype Analysis
+# Description: Generate heatmaps and PCA plots for Tsoi subtypes using gene expression data.
+# =============================================
+
+# ======================
+# Load Required Libraries
+# ======================
+library(dplyr)
+library(pheatmap)
+library(corrr)
+library(ggcorrplot)
+library(FactoMineR)
+library(factoextra)
+
+# ======================
+# Set Working Directory and Load Data
+# ======================
+setwd("/Users/noahdegeorgia/Desktop/Kaufman Lab/RNA-seq analysis")
+
+DEG <- read.csv("DER.csv")
+
+# ======================
+# Prepare logFC Data
+# ======================
+logFC <- DEG %>%
+  select(external_gene_name, starts_with("a375") & ends_with("wt_logFC"), starts_with("wm115") & ends_with("wt5_logFC")) %>%
+  select(-wm115_wt3.wm115_wt5_logFC, -wm115_wt4.wm115_wt5_logFC)
+
+# Rename columns for clarity
+logFC <- logFC %>%
+  rename(
+    A_1.1_logFC = a375_3b3.a375_wt_logFC,
+    A_1.2_logFC = a375_2g1.a375_wt_logFC,
+    A_4.1_logFC = a375_1e3.a375_wt_logFC,
+    A_4.2_logFC = a375_1e12.a375_wt_logFC,
+    W_1.1_wt5_logFC = wm115_c10.wm115_wt5_logFC,
+    W_1.2_wt5_logFC = wm115_c11.wm115_wt5_logFC,
+    W_1.3_wt5_logFC = wm115_c14.wm115_wt5_logFC,
+    W_4.1_wt5_logFC = wm115_c3.wm115_wt5_logFC,
+    W_4.2_wt5_logFC = wm115_c4.wm115_wt5_logFC
+  )
+
+# ======================
+# Filter for Tsoi Genes
+# ======================
+tsoi_logFC <- logFC %>%
+  filter(external_gene_name %in% tsoi_all) %>%
+  distinct() # Remove duplicate rows
+
+rownames(tsoi_logFC) <- tsoi_logFC$external_gene_name # Set gene names as row names
+tsoi_logFC_mat <- tsoi_logFC %>%
+  select(-external_gene_name) %>%
+  as.matrix()
+
+# ======================
+# Create Sorted Data
+# ======================
+sorted_tsoi_logFC <- tsoi_logFC %>%
+  arrange(factor(external_gene_name, levels = tsoi_all)) %>%
+  distinct() # Ensure no duplicates
+
+rownames(sorted_tsoi_logFC) <- sorted_tsoi_logFC$external_gene_name
+sorted_tsoi_logFC_mat <- sorted_tsoi_logFC %>%
+  select(-external_gene_name) %>%
+  as.matrix()
+
+# ======================
+# Create Annotations for Heatmap
+# ======================
+sorted_grouping_variable <- rep("Other", nrow(sorted_tsoi_logFC_mat)) # Default group
+sorted_grouping_variable[rownames(sorted_tsoi_logFC_mat) %in% undifferentiated_tsoi] <- "undifferentiated"
+sorted_grouping_variable[rownames(sorted_tsoi_logFC_mat) %in% undifferentiated_NClike_tsoi] <- "undifferentiated NC-like"
+sorted_grouping_variable[rownames(sorted_tsoi_logFC_mat) %in% NClike_tsoi] <- "NC-like"
+sorted_grouping_variable[rownames(sorted_tsoi_logFC_mat) %in% NC_transitory_tsoi] <- "NC-transitory"
+sorted_grouping_variable[rownames(sorted_tsoi_logFC_mat) %in% transitory_tsoi] <- "transitory"
+sorted_grouping_variable[rownames(sorted_tsoi_logFC_mat) %in% transitory_melanocytic_tsoi] <- "transitory_melanocytic"
+sorted_grouping_variable[rownames(sorted_tsoi_logFC_mat) %in% melanocytic_tsoi] <- "melanocytic"
+
+sorted_row_annot <- data.frame(Group = sorted_grouping_variable)
+rownames(sorted_row_annot) <- rownames(sorted_tsoi_logFC_mat)
+
+# ======================
+# Generate Heatmap
+# ======================
+pheatmap(sorted_tsoi_logFC_mat,
+         scale = "row", # Standardize rows
+         show_rownames = FALSE,
+         cluster_rows = FALSE,
+         cluster_cols = TRUE,
+         annotation_row = sorted_row_annot,
+         main = "Tsoi Subtype Heatmap")
+
+
