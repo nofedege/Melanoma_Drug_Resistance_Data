@@ -1,0 +1,155 @@
+# =============================================
+# Synergy Analysis and Visualization Script
+# =============================================
+
+# Load necessary libraries
+library(synergyfinder)
+library(gridExtra)
+library(ggplot2)
+library(dplyr)
+
+# =============================================
+# Step 1: Load and Prepare Data
+# =============================================
+
+# Load synergy table and select necessary columns
+synergy_table <- read.csv("synergy_table_110324_for_R.csv") %>%
+  select(block_id, drug1, drug2, conc1, conc2, response, conc_unit)
+
+# Reshape and preprocess data
+res <- ReshapeData(
+  data = synergy_table,
+  data_type = "inhibition",  # Specify data type
+  impute = TRUE,            # Enable imputation
+  impute_method = NULL,     # Default imputation method
+  noise = TRUE,             # Add noise to improve stability
+  seed = 123                # Set seed for reproducibility
+)
+
+# =============================================
+# Step 2: Calculate Synergy and Sensitivity
+# =============================================
+
+# Calculate synergy scores using multiple methods
+res <- CalculateSynergy(
+  data = res,
+  method = c("ZIP", "HSA", "Bliss", "Loewe"),  # Specify methods
+  Emin = NA,
+  Emax = NA,
+  correct_baseline = "all"  # Correct for baseline effects
+)
+
+# Calculate sensitivity scores
+res <- CalculateSensitivity(
+  data = res,
+  correct_baseline = "all"  # Correct for baseline effects
+)
+
+# =============================================
+# Step 3: Define Block Descriptions
+# =============================================
+
+# Add block descriptions for each block
+block_descriptions <- c(
+  "A_WT_dab_laro",
+  "A_WT_dab_ent",
+  "A_WT_tram_laro",
+  "A_WT_tram_ent",
+  "A_1.2_dab_laro",
+  "A_1.2_dab_ent",
+  "A_1.2_tram_laro",
+  "A_1.2_tram_ent"
+)
+
+# =============================================
+# Step 4: Visualization and Export
+# =============================================
+
+# Loop through each block and generate plots
+for (plot_block_number in 1:8) {
+  
+  # Generate dose-response curves for both drugs
+  dose_response_curves <- lapply(1:2, function(i) {
+    PlotDoseResponseCurve(
+      data = res,
+      plot_block = plot_block_number,
+      drug_index = i,
+      plot_new = FALSE,
+      record = FALSE
+    )
+  })
+  
+  # Generate heatmaps and contour plots
+  heatmap_response <- Plot2DrugHeatmap(
+    data = res,
+    plot_block = plot_block_number,
+    drugs = c(1, 2),
+    plot_value = "response",
+    dynamic = FALSE,
+    summary_statistic = c("mean", "median")
+  )
+  
+  heatmap_zip <- Plot2DrugHeatmap(
+    data = res,
+    plot_block = plot_block_number,
+    drugs = c(1, 2),
+    plot_value = "ZIP_synergy",
+    dynamic = FALSE,
+    summary_statistic = c("quantile_25", "quantile_75")
+  )
+  
+  contour_response <- Plot2DrugContour(
+    data = res,
+    plot_block = plot_block_number,
+    drugs = c(1, 2),
+    plot_value = "response",
+    dynamic = FALSE,
+    summary_statistic = c("mean", "median")
+  )
+  
+  contour_zip <- Plot2DrugContour(
+    data = res,
+    plot_block = plot_block_number,
+    drugs = c(1, 2),
+    plot_value = "ZIP_synergy",
+    dynamic = FALSE,
+    summary_statistic = c("quantile_25", "quantile_75")
+  )
+  
+  # Generate surface plots
+  surface_response <- Plot2DrugSurface(
+    data = res,
+    plot_block = plot_block_number,
+    drugs = c(1, 2),
+    plot_value = "response",
+    dynamic = FALSE,
+    summary_statistic = c("mean", "quantile_25", "median", "quantile_75")
+  )
+  
+  surface_zip <- Plot2DrugSurface(
+    data = res,
+    plot_block = plot_block_number,
+    drugs = c(1, 2),
+    plot_value = "ZIP_synergy",
+    dynamic = FALSE,
+    summary_statistic = c("mean", "quantile_25", "median", "quantile_75")
+  )
+  
+  # Combine all plots into a grid layout
+  all_plots <- grid.arrange(
+    grobs = c(dose_response_curves, 
+              list(heatmap_response, heatmap_zip, contour_response, contour_zip, surface_response, surface_zip)),
+    ncol = 2,
+    top = paste("Synergy Analysis for Block", plot_block_number, "-", block_descriptions[plot_block_number])
+  )
+  
+  # Generate file name for output
+  file_name <- paste0("synergy_analysis_", block_descriptions[plot_block_number], ".png")
+  
+  # Save combined plots as PNG
+  ggsave(file_name, plot = all_plots, path = getwd(), width = 14, height = 14, dpi = 300)
+}
+
+# =============================================
+# End of Script
+# =============================================
