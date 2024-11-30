@@ -1,0 +1,122 @@
+# =============================================
+# Tsoi Subtype Analysis
+# Description: Generate heatmaps and PCA plots for Tsoi subtypes using gene expression data.
+# =============================================
+
+# ======================
+# Load Required Libraries
+# ======================
+library(dplyr)
+library(pheatmap)
+library(corrr)
+library(ggcorrplot)
+library(FactoMineR)
+library(factoextra)
+
+# ======================
+# Set Working Directory and Load Data
+# ======================
+setwd("/Users/noahdegeorgia/Desktop/Kaufman Lab/RNA-seq analysis")
+
+DEG <- read.csv("DER.csv")
+
+# ======================
+# Prepare logFC Data
+# ======================
+logFC <- DEG %>%
+  select(external_gene_name, starts_with("a375") & ends_with("wt_logFC"), starts_with("wm115") & ends_with("wt5_logFC")) %>%
+  select(-wm115_wt3.wm115_wt5_logFC, -wm115_wt4.wm115_wt5_logFC)
+
+# Rename columns for clarity
+logFC <- logFC %>%
+  rename(
+    A_1.1_logFC = a375_3b3.a375_wt_logFC,
+    A_1.2_logFC = a375_2g1.a375_wt_logFC,
+    A_4.1_logFC = a375_1e3.a375_wt_logFC,
+    A_4.2_logFC = a375_1e12.a375_wt_logFC,
+    W_1.1_wt5_logFC = wm115_c10.wm115_wt5_logFC,
+    W_1.2_wt5_logFC = wm115_c11.wm115_wt5_logFC,
+    W_1.3_wt5_logFC = wm115_c14.wm115_wt5_logFC,
+    W_4.1_wt5_logFC = wm115_c3.wm115_wt5_logFC,
+    W_4.2_wt5_logFC = wm115_c4.wm115_wt5_logFC
+  )
+
+# ======================
+# Filter for Tsoi Genes
+# ======================
+tsoi_logFC <- logFC %>%
+  filter(external_gene_name %in% tsoi_all) %>%
+  distinct() # Remove duplicate rows
+
+rownames(tsoi_logFC) <- tsoi_logFC$external_gene_name # Set gene names as row names
+tsoi_logFC_mat <- tsoi_logFC %>%
+  select(-external_gene_name) %>%
+  as.matrix()
+
+# ======================
+# Create Sorted Data
+# ======================
+sorted_tsoi_logFC <- tsoi_logFC %>%
+  arrange(factor(external_gene_name, levels = tsoi_all)) %>%
+  distinct() # Ensure no duplicates
+
+rownames(sorted_tsoi_logFC) <- sorted_tsoi_logFC$external_gene_name
+sorted_tsoi_logFC_mat <- sorted_tsoi_logFC %>%
+  select(-external_gene_name) %>%
+  as.matrix()
+
+# ======================
+# Create Annotations for Heatmap
+# ======================
+sorted_grouping_variable <- rep("Other", nrow(sorted_tsoi_logFC_mat)) # Default group
+sorted_grouping_variable[rownames(sorted_tsoi_logFC_mat) %in% undifferentiated_tsoi] <- "undifferentiated"
+sorted_grouping_variable[rownames(sorted_tsoi_logFC_mat) %in% undifferentiated_NClike_tsoi] <- "undifferentiated NC-like"
+sorted_grouping_variable[rownames(sorted_tsoi_logFC_mat) %in% NClike_tsoi] <- "NC-like"
+sorted_grouping_variable[rownames(sorted_tsoi_logFC_mat) %in% NC_transitory_tsoi] <- "NC-transitory"
+sorted_grouping_variable[rownames(sorted_tsoi_logFC_mat) %in% transitory_tsoi] <- "transitory"
+sorted_grouping_variable[rownames(sorted_tsoi_logFC_mat) %in% transitory_melanocytic_tsoi] <- "transitory_melanocytic"
+sorted_grouping_variable[rownames(sorted_tsoi_logFC_mat) %in% melanocytic_tsoi] <- "melanocytic"
+
+sorted_row_annot <- data.frame(Group = sorted_grouping_variable)
+rownames(sorted_row_annot) <- rownames(sorted_tsoi_logFC_mat)
+
+# ======================
+# Generate Heatmap
+# ======================
+pheatmap(sorted_tsoi_logFC_mat,
+         scale = "row", # Standardize rows
+         show_rownames = FALSE,
+         cluster_rows = FALSE,
+         cluster_cols = TRUE,
+         annotation_row = sorted_row_annot,
+         main = "Tsoi Subtype Heatmap")
+
+# ======================
+# PCA Analysis
+# ======================
+# Scale data
+tsoi_logFC_scaled <- scale(tsoi_logFC_mat)
+
+# Correlation matrix
+corr_matrix <- cor(tsoi_logFC_scaled, use = "pairwise.complete.obs")
+ggcorrplot(corr_matrix, title = "Correlation Matrix for Tsoi Genes")
+
+# Perform PCA
+data.pca <- prcomp(tsoi_logFC_scaled, scale. = TRUE)
+summary(data.pca)
+
+# Scree plot
+fviz_eig(data.pca, addlabels = TRUE, main = "Variance Explained by PCA Components")
+
+# PCA variable contributions
+fviz_pca_var(data.pca, col.var = "cos2",
+             gradient.cols = c("black", "orange", "green"),
+             repel = TRUE,
+             main = "PCA Variable Contributions")
+
+# PCA individual contributions
+fviz_pca_ind(data.pca, col.ind = "cos2",
+             gradient.cols = c("black", "orange", "green"),
+             repel = TRUE,
+             main = "PCA Individual Contributions")
+
