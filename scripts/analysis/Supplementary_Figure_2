@@ -1,0 +1,151 @@
+#S2c
+# Load required libraries
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+library(Biostrings)
+
+# =============================================
+# Function to Prepare Alignment Data
+# =============================================
+prepare_alignment_data <- function(data, alignment_col, genomic_offset = 0) {
+  data %>%
+    separate({{ alignment_col }}, into = c("Chr", "Start", "End"), sep = "[:-]") %>%
+    mutate(
+      Start = as.numeric(Start) + genomic_offset,
+      End = as.numeric(End) + genomic_offset
+    )
+}
+
+# =============================================
+# Function to Plot Alignment Blocks
+# =============================================
+plot_alignment_blocks <- function(data, features, start_col, end_col, species_col, match_col, feature_col, title, x_limits = NULL) {
+  ggplot(data, aes_string(x = start_col, xend = end_col, y = species_col, yend = species_col)) +
+    geom_segment(aes_string(color = match_col), size = 2) +
+    geom_vline(data = features, aes_string(xintercept = feature_col), color = "yellow", size = 1.5, linetype = "solid", alpha = 0.5) +
+    labs(title = title, x = "Genomic Location (bp)", y = "Species") +
+    theme_minimal() +
+    scale_color_gradient(low = "blue", high = "red", name = "Match %") +
+    theme(legend.title = element_text("Match %")) +
+    (if (!is.null(x_limits)) xlim(x_limits[1], x_limits[2]) else NULL)
+}
+
+# =============================================
+# Example 1: Region 1 Plot
+# =============================================
+
+# Example data for Region 1
+region1_data <- data.frame(
+  Region = rep("Region 1", 9),
+  Species = c("Chimpanzee", "Possum", "Possum", "Chicken", "Rat", "Mouse", "Cow", "Dog", "Rhesus Macaque"),
+  Comparative_Genome = c("panTro3", "monDom5", "monDom5", "galGal3", "rn4", "mm10", "bosTau6", "canFam2", "rheMac2"),
+  Alignment_Block_Human = c(
+    "chr22:38411208-38412746", "chr22:38412487-38412850", "chr22:38412341-38413111", 
+    "chr22:38412422-38412982", "chr22:38411121-38415635", "chr22:38411134-38415855", 
+    "chr22:38411114-38415219", "chr22:38411114-38415777", "chr22:38403951-38415875"
+  ),
+  Identity_Match_Percent = c(100.0, 77.7, 80.2, 77.8, 86.0, 90.8, 92.8, 93.0, 98.2),
+  Length_bps = c(260, 364, 86, 424, 501, 501, 501, 501, 501)
+)
+
+# Prepare the data
+region1_data <- prepare_alignment_data(region1_data, alignment_col = Alignment_Block_Human)
+
+# Define features for Region 1
+region1_features <- data.frame(
+  Feature = c("Feature 1", "Feature 2"),
+  Position = c(38412601, 38412777)
+)
+
+# Plot and save
+region1_plot <- plot_alignment_blocks(
+  data = region1_data,
+  features = region1_features,
+  start_col = "Start",
+  end_col = "End",
+  species_col = "Species",
+  match_col = "Identity_Match_Percent",
+  feature_col = "Position",
+  title = "Alignment Block Locations in Region 1",
+  x_limits = c(38411000, 38416000)
+)
+ggsave("region1_alignment_blocks.png", region1_plot, width = 8, height = 6, dpi = 300)
+
+# =============================================
+# Example 2: Region 4 Plot
+# =============================================
+
+# Load and prepare Region 4 data
+region4_data <- read.csv("region4_conservation.csv")
+region4_data <- prepare_alignment_data(region4_data, alignment_col = Alignment.Block.Human)
+
+# Define features for Region 4
+region4_features <- data.frame(
+  Feature = c("Feature 1"),
+  Position = c(38434715)
+)
+
+# Plot and save
+region4_plot <- plot_alignment_blocks(
+  data = region4_data,
+  features = region4_features,
+  start_col = "Start",
+  end_col = "End",
+  species_col = "Species",
+  match_col = "Identity.Match.Percent",
+  feature_col = "Position",
+  title = "Alignment Block Locations in Region 4",
+  x_limits = c(38434000, 38436000)
+)
+ggsave("region4_alignment_blocks.png", region4_plot, width = 8, height = 6, dpi = 300)
+
+# =============================================
+# Example 3: Fish Conservation Plot
+# =============================================
+
+# Load and prepare fish conservation data
+fish_conservation <- read.csv("fish_conservation.csv") %>%
+  mutate(Species = X) %>%
+  select(Species, start, end, Identity.Match.Percent, Length.bps) %>%
+  filter(start != "NA", end != "NA") %>%
+  mutate(
+    Start_genomic_location = start + 1989857,
+    End_genomic_location = end + 1989857
+  )
+
+# Define features for fish conservation
+fish_features <- data.frame(
+  Feature = c("Feature 1"),
+  Position = c(1990251)
+)
+
+# Plot and save
+fish_plot <- plot_alignment_blocks(
+  data = fish_conservation,
+  features = fish_features,
+  start_col = "Start_genomic_location",
+  end_col = "End_genomic_location",
+  species_col = "Species",
+  match_col = "Identity.Match.Percent",
+  feature_col = "Position",
+  title = "Fish Conservation Alignment Blocks",
+  x_limits = c(1989857, 1990651)
+)
+ggsave("fish_alignment_blocks.png", fish_plot, width = 8, height = 6, dpi = 300)
+
+# =============================================
+# Example 4: DNA Alignment Identity Calculation
+# =============================================
+
+# Load the Clustal alignment file
+sinograhami_alignment <- readDNAMultipleAlignment("sinograhami.aln", format = "clustal")
+
+# Calculate identity match percentage
+consensus_matrix <- consensusMatrix(sinograhami_alignment)
+total_positions <- ncol(consensus_matrix)
+matches <- sum(consensus_matrix == max(consensus_matrix))  # Perfect matches
+identity_percentage <- (matches / total_positions) * 100
+
+# Print result
+cat("Identity Percentage:", identity_percentage, "%\n")
