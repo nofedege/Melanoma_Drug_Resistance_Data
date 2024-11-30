@@ -1,0 +1,115 @@
+#6a
+
+# =============================================
+# Required Libraries
+# =============================================
+library(dplyr)
+library(tidyr)
+library(pheatmap)
+library(ggplot2)
+library(RColorBrewer)
+
+# =============================================
+# Load and Prepare Data
+# =============================================
+# Assuming `logFC_pvalues` contains the gene expression data
+
+# Define cell line-specific constants
+cell_line_info <- tibble(
+  cell_line = c("A_1.1", "A_1.2", "A_4.1", "A_4.2", "W_1.1", "W_1.2", "W_1.3", "W_4.1", "W_4.2"),
+  IC50_dabrafenib = c(6.209, 10.86, 16.78, 19.78, 0.3222, 82.24, 1.126, 15.4, 15.47),
+  IC50_trametinib = c(0.9886, 4.388, 2.085, 5.097, 0.0926, 6.772, 0.406, 3.894, 1.178),
+  phenotype_score = c(4.749805, 4.975302, 4.385401, 4.668296, 3.608077, 4.439768, 3.813018, 4.386765, 4.347178)
+)
+
+# =============================================
+# Define Functions
+# =============================================
+
+# Function to calculate priority scores
+calculate_priority_scores <- function(data, cell_line_info, weights = list(logFC = 1, adj_pvalue = 1, IC50 = 1, pheno_score = 1)) {
+  # Reshape data to long format
+  long_data <- data %>%
+    pivot_longer(
+      cols = starts_with("A_") | starts_with("W_"),
+      names_to = c("cell_line", ".value"),
+      names_pattern = "(A_[0-9]\\.[0-9]|W_[0-9]\\.[0-9])_(logFC|pvalue|adj_pvalue)"
+    ) %>%
+    left_join(cell_line_info, by = "cell_line") %>%
+    mutate(
+      priority_score = weights$logFC * abs(logFC) +
+        weights$adj_pvalue * (1 - adj_pvalue) +
+        weights$IC50 * (IC50_dabrafenib + IC50_trametinib) / 2 +
+        weights$pheno_score * phenotype_score
+    )
+  
+  return(long_data)
+}
+
+# Function to visualize heatmap of top genes
+visualize_priority_heatmap <- function(data, n_top_genes = 100, filename = NULL) {
+  top_genes <- data %>%
+    group_by(cell_line) %>%
+    arrange(desc(priority_score)) %>%
+    slice_head(n = n_top_genes) %>%
+    select(external_gene_name, cell_line, priority_score) %>%
+    pivot_wider(names_from = cell_line, values_from = priority_score, values_fn = max) %>%
+    column_to_rownames("external_gene_name")
+  
+  pheatmap(top_genes,
+           color = colorRampPalette(rev(brewer.pal(9, "RdBu")))(100),
+           scale = "column",
+           cluster_rows = TRUE,
+           cluster_cols = FALSE,
+           fontsize_row = 6,
+           main = "Heatmap of Top Genes by Priority Score Across Cell Lines")
+  
+  if (!is.null(filename)) {
+    ggsave(filename, width = 12, height = 10, dpi = 300)
+  }
+}
+
+# Function to summarize priority scores
+summarize_priority_scores <- function(data, filename = NULL) {
+  summary <- data %>%
+    group_by(external_gene_name) %>%
+    summarise(average_priority_score = mean(priority_score, na.rm = TRUE)) %>%
+    arrange(desc(average_priority_score))
+  
+  if (!is.null(filename)) {
+    write.csv(summary, filename, row.names = FALSE)
+  }
+  
+  return(summary)
+}
+
+# =============================================
+# Analysis
+# =============================================
+
+# Step 1: Calculate priority scores
+weights <- list(logFC = 1, adj_pvalue = 1, IC50 = 1, pheno_score = 1)
+priority_data <- calculate_priority_scores(logFC_pvalues, cell_line_info, weights)
+
+# Step 2: Visualize top genes with heatmap
+visualize_priority_heatmap(priority_data, n_top_genes = 100, filename = "top_genes_priority_score_heatmap.png")
+
+# Step 3: Summarize priority scores
+priority_summary <- summarize_priority_scores(priority_data, filename = "priority_score_summary.csv")
+
+# Step 4: Plot average priority scores for top genes
+ggplot(priority_summary, aes(x = reorder(external_gene_name, -average_priority_score), y = average_priority_score)) +
+  geom_bar(stat = "identity", fill = "blue") +
+  coord_flip() +
+  labs(
+    x = "Gene",
+    y = "Average Priority Score",
+    title = "Average Priority Score of Top Genes Across Cell Lines"
+  ) +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = 8))
+ggsave("average_priority_score_genes.png", width = 10, height = 6, dpi = 300)
+
+# =============================================
+# End of Script
+# =============================================
