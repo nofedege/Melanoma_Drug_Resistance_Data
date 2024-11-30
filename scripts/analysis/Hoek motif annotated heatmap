@@ -1,0 +1,85 @@
+# =============================================
+# Generate Heatmap for Hoek Motifs
+# Description: Generate and save a heatmap for Hoek motifs across gene expression data.
+# =============================================
+
+# ======================
+# Load Required Libraries
+# ======================
+library(dplyr)
+library(pheatmap)
+
+# ======================
+# Define Gene Lists
+# ======================
+hoek_motif_one <- c(
+  "AP1S2", "APOC1", "APOE", "BCL2A1", "CAPN3", "CART1", "CDK5R1", "CITED1",
+  "CLCN7", "D4S234E", "DCT", "DKFZP434F0318", "DSU", "EDNRB", "ERBB3", "GALNT3",
+  "GK", "GMPR", "GPM6B", "GPR143", "GPR56", "GPRC5B", "GREB1", "GYG2", "INPP4B",
+  "IRF4", "ITPKB", "LZTS1", "MATP", "MBP", "MITF", "MLANA", "PHACTR1", "PIR",
+  "PLA1A", "PLP1", "PLXNC1", "RAB38", "RENBP", "RGS20", "RRAGD", "S100A1",
+  "SILV", "SNCA", "SOX10", "ST3GAL6", "TFAP2A", "TNFRSF14", "TRPM1", "TYR", "TYRP1"
+)
+
+hoek_motif_two <- c(
+  "ABCC3", "ADAM12", "AMIGO2", "ARK5", "AXL", "BGN /// SDCCAG33", "CDH13", "CDH2",
+  "COL5A1", "CTGF", "CXCL2", "CYR61", "DKK1", "DKK3", "EGFR", "EHD2", "ELL2", "F3",
+  "FBN1", "FGF2", "FOXD1", "HNT", "HS3ST3A1", "IL6", "IL8", "INHBA", "KIAA1199",
+  "LCRISP2", "LOX", "LOXL2", "MICAL2", "NID2", "NNMT", "NRP1", "PDGFC", "PDGFRB",
+  "PLAGL1", "PODXL", "PTGFR", "PTX3", "SART2", "SERPINE1", "STC2", "TAGLN", "TCF4",
+  "TGFBI", "THBS1", "THY1 /// LOC94105", "TNFRSF11B", "TPM1", "TPM2", "VEGFC",
+  "WNT5A", "WNT5B"
+)
+
+# ======================
+# Define Heatmap Function
+# ======================
+generate_motif_heatmap <- function(data, gene_list_one, gene_list_two, filename) {
+  # Combine gene lists
+  combined_gene_list <- c(gene_list_one, gene_list_two)
+  
+  # Filter and annotate the data
+  filtered_data <- data %>%
+    filter(external_gene_name %in% combined_gene_list) %>%
+    mutate(motif = ifelse(external_gene_name %in% gene_list_one, "Motif 1", "Motif 2")) %>%
+    unique() %>%
+    arrange(motif) %>%
+    as.data.frame()
+  
+  # Set rownames to external_gene_name
+  rownames(filtered_data) <- filtered_data$external_gene_name
+  
+  # Prepare the data matrix for pheatmap
+  data_matrix <- filtered_data %>%
+    select(contains("logFC")) %>%
+    as.matrix()
+  
+  # Prepare the annotation data
+  annotation_row <- data.frame(motif = filtered_data$motif)
+  rownames(annotation_row) <- rownames(filtered_data)
+  
+  # Generate and save the heatmap
+  pheatmap(
+    data_matrix,
+    annotation_row = annotation_row,
+    cluster_rows = FALSE, # Do not cluster rows, to keep the order of motifs
+    cluster_cols = TRUE,  # Cluster columns if needed
+    show_rownames = TRUE,
+    show_colnames = TRUE,
+    annotation_names_row = TRUE,
+    filename = filename,  # Save the heatmap to a file
+    width = 10,           # Adjust width as needed
+    height = 10           # Adjust height as needed
+  )
+}
+
+# ======================
+# Example Usage
+# ======================
+# Assuming `logFC_pvalues` is your data frame
+generate_motif_heatmap(
+  data = logFC_pvalues, 
+  gene_list_one = hoek_motif_one, 
+  gene_list_two = hoek_motif_two, 
+  filename = "hoek_motif_heatmap_wm115_051724.png"
+)
