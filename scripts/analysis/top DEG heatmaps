@@ -1,0 +1,36 @@
+# Load required libraries
+library(dplyr)
+library(pheatmap)
+library(tidyr)
+library(ggplot2)
+
+# Step 1: Filter Significant Genes
+logFC_columns <- grep("logFC", names(logFC_pvalues), value = TRUE)
+adj_pvalue_columns <- grep("adj_pvalue", names(logFC_pvalues), value = TRUE)
+
+significant_genes <- lapply(seq_along(logFC_columns), function(i) {
+  filter_significant_genes(logFC_pvalues, logFC_columns[i], NULL, adj_pvalue_columns[i])
+})
+
+# Step 2: Calculate Mean Replicates
+replicate_patterns <- c("c10", "c11", "c14", "c3", "c4")
+averaged_samples <- calculate_replicate_means(sample_values, replicate_patterns)
+
+# Step 3: Heatmap for Shared DEGs
+shared_DEG <- Reduce(intersect, significant_genes)
+DEG_samples <- averaged_samples %>%
+  filter(external_gene_name %in% shared_DEG) %>%
+  column_to_rownames("external_gene_name")
+
+generate_heatmap(DEG_samples, title = "Shared DEGs Heatmap")
+
+# Step 4: Generate Boxplot for Specific Genes
+fourpheno_wm115_avg_long <- fourpheno_wm115_avg %>%
+  rownames_to_column(var = "gene") %>%
+  pivot_longer(cols = -gene, names_to = "condition", values_to = "expression")
+
+ggplot(fourpheno_wm115_avg_long, aes(x = condition, y = expression)) +
+  geom_boxplot() +
+  theme_minimal() +
+  labs(title = "Expression of Key Genes", x = "Condition", y = "Expression") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
